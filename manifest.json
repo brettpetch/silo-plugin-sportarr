@@ -1,0 +1,55 @@
+{
+  "plugin_id": "silo.sportarr",
+  "version": "1.0.0",
+  "checksum": "__CHECKSUM__",
+  "silo_api_version": "v1",
+  "supported_platforms": [
+    {
+      "os": "darwin",
+      "arch": "arm64"
+    },
+    {
+      "os": "linux",
+      "arch": "amd64"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64"
+    }
+  ],
+  "capabilities": [
+    {
+      "type": "metadata_provider.v1",
+      "id": "sportarr",
+      "display_name": "Sportarr",
+      "description": "Sportarr — metadata for sports leagues as TV shows.",
+      "metadata": {
+        "default_priority": {
+          "series": 1,
+          "season": 1,
+          "episode": 1
+        }
+      }
+    }
+  ],
+  "global_config_schema": [
+    {
+      "key": "sportarr",
+      "title": "Sportarr",
+      "description": "Configure Sportarr API access",
+      "required": false,
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"base_url\":{\"type\":\"string\"}}}",
+      "admin_form": {
+        "fields": [
+          {
+            "key": "base_url",
+            "label": "Base URL",
+            "description": "Sportarr instance URL. Defaults to https://sportarr.net if left empty.",
+            "control": 1,
+            "placeholder": "https://sportarr.net"
+          }
+        ]
+      }
+    }
+  ]
+}

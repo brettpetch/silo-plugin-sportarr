@@ -1,0 +1,221 @@
+package provider
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/Silo-Server/silo-plugin-sportarr/metadata"
+)
+
+type Provider struct {
+	client *Client
+}
+
+func NewProvider(baseURL string) *Provider {
+	c := NewClient(10)
+	if baseURL != "" {
+		c.SetBaseURL(baseURL)
+	}
+	return &Provider{client: c}
+}
+
+func NewProviderWithClient(c *Client) *Provider {
+	return &Provider{client: c}
+}
+
+func (p *Provider) Slug() string       { return "sportarr" }
+func (p *Provider) Name() string       { return "Sportarr" }
+func (p *Provider) ForTypes() []string { return []string{"series"} }
+
+func (p *Provider) Search(ctx context.Context, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	if sportarrID := query.ProviderIDs["sportarr"]; sportarrID != "" {
+		return p.searchByID(ctx, sportarrID)
+	}
+
+	if query.Title != "" {
+		return p.searchByTitle(ctx, query)
+	}
+
+	return nil, nil
+}
+
+func (p *Provider) searchByID(ctx context.Context, leagueID string) ([]metadata.SearchResult, error) {
+	series, err := p.client.GetSeries(ctx, leagueID)
+	if err != nil {
+		return nil, err
+	}
+	return []metadata.SearchResult{{
+		Name:        series.Title,
+		Year:        series.Year,
+		ProviderIDs: map[string]string{"sportarr": leagueID},
+		ImageURL:    series.PosterURL,
+		Overview:    series.Summary,
+		Provider:    p.Slug(),
+	}}, nil
+}
+
+func (p *Provider) searchByTitle(ctx context.Context, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	resp, err := p.client.Search(ctx, query.Title)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []metadata.SearchResult
+	for _, r := range resp.Results {
+		out = append(out, metadata.SearchResult{
+			Name:        r.Title,
+			Year:        r.Year,
+			ProviderIDs: map[string]string{"sportarr": r.ID},
+			ImageURL:    r.PosterURL,
+			Provider:    p.Slug(),
+		})
+	}
+	return out, nil
+}
+
+func (p *Provider) GetMetadata(ctx context.Context, req metadata.MetadataRequest) (*metadata.MetadataResult, error) {
+	sportarrID := req.ProviderIDs["sportarr"]
+	if sportarrID == "" {
+		return nil, nil
+	}
+
+	series, err := p.client.GetSeries(ctx, sportarrID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &metadata.MetadataResult{
+		HasMetadata:   true,
+		Title:         series.Title,
+		Overview:      series.Summary,
+		Year:          series.Year,
+		ContentRating: series.ContentRating,
+		ProviderIDs:   map[string]string{"sportarr": sportarrID},
+		PosterPath:    series.PosterURL,
+		BackdropPath:  series.FanartURL,
+	}
+
+	result.Genres = append(result.Genres, series.Genres...)
+	if series.Studio != "" {
+		result.Studios = []string{series.Studio}
+	}
+
+	seasons, err := p.client.GetSeasons(ctx, sportarrID)
+	if err == nil && seasons != nil {
+		result.SeasonCount = len(seasons.Seasons)
+	}
+
+	return result, nil
+}
+
+func (p *Provider) GetSeasons(ctx context.Context, req metadata.SeasonsRequest) ([]metadata.SeasonResult, error) {
+	sportarrID := req.ProviderIDs["sportarr"]
+	if sportarrID == "" {
+		return nil, nil
+	}
+
+	resp, err := p.client.GetSeasons(ctx, sportarrID)
+	if err != nil {
+		return nil, err
+	}
+
+	seasons := make([]metadata.SeasonResult, 0, len(resp.Seasons))
+	for _, s := range resp.Seasons {
+		seasons = append(seasons, metadata.SeasonResult{
+			ContentID:    fmt.Sprintf("%s:%d", sportarrID, s.SeasonNumber),
+			SeasonNumber: s.SeasonNumber,
+			Title:        s.Name,
+			PosterPath:   s.PosterURL,
+		})
+	}
+	return seasons, nil
+}
+
+func (p *Provider) GetEpisodes(ctx context.Context, req metadata.EpisodesRequest) ([]metadata.EpisodeResult, error) {
+	sportarrID := req.ProviderIDs["sportarr"]
+	if sportarrID == "" {
+		return nil, nil
+	}
+
+	resp, err := p.client.GetSeasonEpisodes(ctx, sportarrID, req.SeasonNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	episodes := make([]metadata.EpisodeResult, 0, len(resp.Episodes))
+	for _, ep := range resp.Episodes {
+		providerIDs := map[string]string{"sportarr": ep.ID}
+		episodes = append(episodes, metadata.EpisodeResult{
+			ContentID:     ep.ID,
+			ProviderIDs:   providerIDs,
+			SeasonNumber:  ep.SeasonNumber,
+			EpisodeNumber: ep.EpisodeNumber,
+			Title:         ep.Title,
+			Overview:      ep.Summary,
+			AirDate:       ep.AirDate,
+			Runtime:       ep.DurationMinutes,
+			StillPath:     ep.ThumbURL,
+		})
+	}
+	return episodes, nil
+}
+
+func (p *Provider) GetImages(ctx context.Context, req metadata.ImageRequest) ([]metadata.RemoteImage, error) {
+	sportarrID := req.ProviderIDs["sportarr"]
+	if sportarrID == "" {
+		return nil, nil
+	}
+
+	switch req.ContentType {
+	case "series":
+		return p.getSeriesImages(ctx, sportarrID)
+	case "episode":
+		return p.getEpisodeImages(ctx, sportarrID)
+	}
+	return nil, nil
+}
+
+func (p *Provider) getSeriesImages(ctx context.Context, leagueID string) ([]metadata.RemoteImage, error) {
+	series, err := p.client.GetSeries(ctx, leagueID)
+	if err != nil {
+		return nil, err
+	}
+
+	var images []metadata.RemoteImage
+	if series.PosterURL != "" {
+		images = append(images, metadata.RemoteImage{
+			URL:  series.PosterURL,
+			Type: metadata.ImagePoster,
+		})
+	}
+	if series.FanartURL != "" {
+		images = append(images, metadata.RemoteImage{
+			URL:  series.FanartURL,
+			Type: metadata.ImageBackdrop,
+		})
+	}
+	if series.BannerURL != "" {
+		images = append(images, metadata.RemoteImage{
+			URL:  series.BannerURL,
+			Type: metadata.ImageBanner,
+		})
+	}
+	return images, nil
+}
+
+func (p *Provider) getEpisodeImages(ctx context.Context, eventID string) ([]metadata.RemoteImage, error) {
+	ep, err := p.client.GetEpisode(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+
+	var images []metadata.RemoteImage
+	if ep.ThumbURL != "" {
+		images = append(images, metadata.RemoteImage{
+			URL:  ep.ThumbURL,
+			Type: metadata.ImageStill,
+		})
+	}
+	return images, nil
+}
+

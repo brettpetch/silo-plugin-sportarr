@@ -1,0 +1,247 @@
+package provider
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/Silo-Server/silo-plugin-sportarr/metadata"
+)
+
+func newTestProvider(t *testing.T, handler http.Handler) *Provider {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	c := NewClient(100)
+	c.SetBaseURL(srv.URL)
+	return NewProviderWithClient(c)
+}
+
+func TestSearchByTitle(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(AgentSearchResponse{
+			Results: []AgentSearchResult{
+				{ID: "league-1", Title: "Premier League", Year: 1992},
+				{ID: "league-2", Title: "Premier League 2", Year: 2023},
+			},
+		})
+	}))
+
+	results, err := p.Search(context.Background(), metadata.SearchQuery{Title: "Premier League"})
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].ProviderIDs["sportarr"] != "league-1" {
+		t.Errorf("expected sportarr ID league-1, got %s", results[0].ProviderIDs["sportarr"])
+	}
+}
+
+func TestSearchByProviderID(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/metadata/agents/series/league-1" {
+			t.Errorf("expected series lookup, got %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(AgentSeriesResponse{
+			Title: "UFC", Year: 1993, Summary: "MMA league",
+		})
+	}))
+
+	results, err := p.Search(context.Background(), metadata.SearchQuery{
+		ProviderIDs: map[string]string{"sportarr": "league-1"},
+	})
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Name != "UFC" {
+		t.Errorf("expected name UFC, got %s", results[0].Name)
+	}
+}
+
+func TestGetMetadata(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/metadata/agents/series/league-1":
+			json.NewEncoder(w).Encode(AgentSeriesResponse{
+				Title:   "Formula 1",
+				Summary: "Open-wheel racing",
+				Year:    1950,
+				Genres:  []string{"Motorsport"},
+				Studio:  "FIA",
+			})
+		case "/api/metadata/agents/series/league-1/seasons":
+			json.NewEncoder(w).Encode(AgentSeasonsResponse{
+				Seasons: []AgentSeason{
+					{SeasonNumber: 2023, Name: "2023"},
+					{SeasonNumber: 2024, Name: "2024"},
+				},
+			})
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+
+	result, err := p.GetMetadata(context.Background(), metadata.MetadataRequest{
+		ProviderIDs: map[string]string{"sportarr": "league-1"},
+		ContentType: "series",
+	})
+	if err != nil {
+		t.Fatalf("get metadata failed: %v", err)
+	}
+	if !result.HasMetadata {
+		t.Fatal("expected HasMetadata=true")
+	}
+	if result.Title != "Formula 1" {
+		t.Errorf("expected title Formula 1, got %s", result.Title)
+	}
+	if result.SeasonCount != 2 {
+		t.Errorf("expected 2 seasons, got %d", result.SeasonCount)
+	}
+	if len(result.Genres) != 1 || result.Genres[0] != "Motorsport" {
+		t.Errorf("unexpected genres: %v", result.Genres)
+	}
+}
+
+func TestGetSeasons(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(AgentSeasonsResponse{
+			Seasons: []AgentSeason{
+				{SeasonNumber: 2023, Name: "2023 Season", EpisodeCount: 23},
+				{SeasonNumber: 2024, Name: "2024 Season", EpisodeCount: 24},
+			},
+		})
+	}))
+
+	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
+		ProviderIDs: map[string]string{"sportarr": "league-1"},
+	})
+	if err != nil {
+		t.Fatalf("get seasons failed: %v", err)
+	}
+	if len(seasons) != 2 {
+		t.Fatalf("expected 2 seasons, got %d", len(seasons))
+	}
+	if seasons[0].SeasonNumber != 2023 {
+		t.Errorf("expected season 2023, got %d", seasons[0].SeasonNumber)
+	}
+	if seasons[1].Title != "2024 Season" {
+		t.Errorf("expected title 2024 Season, got %s", seasons[1].Title)
+	}
+}
+
+func TestGetEpisodes(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(AgentEpisodesResponse{
+			Episodes: []AgentEpisode{
+				{ID: "ev-1", Title: "Monaco GP", SeasonNumber: 2024, EpisodeNumber: 8, AirDate: "2024-05-26", DurationMinutes: 120},
+				{ID: "ev-2", Title: "Canadian GP", SeasonNumber: 2024, EpisodeNumber: 9, AirDate: "2024-06-09", DurationMinutes: 120},
+			},
+		})
+	}))
+
+	episodes, err := p.GetEpisodes(context.Background(), metadata.EpisodesRequest{
+		ProviderIDs:  map[string]string{"sportarr": "league-1"},
+		SeasonNumber: 2024,
+	})
+	if err != nil {
+		t.Fatalf("get episodes failed: %v", err)
+	}
+	if len(episodes) != 2 {
+		t.Fatalf("expected 2 episodes, got %d", len(episodes))
+	}
+	if episodes[0].Title != "Monaco GP" {
+		t.Errorf("expected Monaco GP, got %s", episodes[0].Title)
+	}
+	if episodes[0].ProviderIDs["sportarr"] != "ev-1" {
+		t.Errorf("expected sportarr ID ev-1, got %s", episodes[0].ProviderIDs["sportarr"])
+	}
+}
+
+func TestGetImagesForSeries(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(AgentSeriesResponse{
+			PosterURL: "https://sportarr.net/img/poster.jpg",
+			FanartURL: "https://sportarr.net/img/fanart.jpg",
+			BannerURL: "https://sportarr.net/img/banner.jpg",
+		})
+	}))
+
+	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
+		ProviderIDs: map[string]string{"sportarr": "league-1"},
+		ContentType: "series",
+	})
+	if err != nil {
+		t.Fatalf("get images failed: %v", err)
+	}
+	if len(images) != 3 {
+		t.Fatalf("expected 3 images, got %d", len(images))
+	}
+	if images[0].Type != metadata.ImagePoster {
+		t.Errorf("expected poster type, got %d", images[0].Type)
+	}
+	if images[1].Type != metadata.ImageBackdrop {
+		t.Errorf("expected backdrop type for fanart, got %d", images[1].Type)
+	}
+	if images[2].Type != metadata.ImageBanner {
+		t.Errorf("expected banner type, got %d", images[2].Type)
+	}
+}
+
+func TestGetImagesForEpisode(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(AgentEpisodeResponse{
+			ThumbURL: "https://sportarr.net/img/thumb.jpg",
+		})
+	}))
+
+	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
+		ProviderIDs: map[string]string{"sportarr": "ev-1"},
+		ContentType: "episode",
+	})
+	if err != nil {
+		t.Fatalf("get images failed: %v", err)
+	}
+	if len(images) != 1 {
+		t.Fatalf("expected 1 image, got %d", len(images))
+	}
+	if images[0].Type != metadata.ImageStill {
+		t.Errorf("expected still type, got %d", images[0].Type)
+	}
+}
+
+func TestSearchEmptyQuery(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not make any HTTP request for empty query")
+	}))
+
+	results, err := p.Search(context.Background(), metadata.SearchQuery{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if results != nil {
+		t.Errorf("expected nil results, got %v", results)
+	}
+}
+
+func TestGetMetadataNoProviderID(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not make any HTTP request without provider ID")
+	}))
+
+	result, err := p.GetMetadata(context.Background(), metadata.MetadataRequest{
+		ProviderIDs: map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil result, got %v", result)
+	}
+}
