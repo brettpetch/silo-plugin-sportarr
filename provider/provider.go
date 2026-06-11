@@ -238,56 +238,22 @@ func (p *Provider) GetImages(ctx context.Context, req metadata.ImageRequest) ([]
 		return nil, nil
 	}
 
+	var entityType string
 	switch req.ContentType {
 	case "series":
-		return p.getSeriesImages(ctx, sportarrID)
+		entityType = "league"
+	case "season":
+		entityType = "season"
 	case "episode":
-		return p.getEpisodeImages(ctx, sportarrID)
+		entityType = "event"
+	default:
+		return nil, nil
 	}
-	return nil, nil
-}
 
-func (p *Provider) getSeriesImages(ctx context.Context, leagueID string) ([]metadata.RemoteImage, error) {
-	series, err := p.client.GetSeries(ctx, leagueID)
+	resp, err := p.client.GetEntityImages(ctx, entityType, sportarrID)
 	if err != nil {
 		return nil, err
 	}
-
-	var images []metadata.RemoteImage
-	if series.PosterURL != "" {
-		images = append(images, metadata.RemoteImage{
-			URL:  series.PosterURL,
-			Type: metadata.ImagePoster,
-		})
-	}
-	if series.FanartURL != "" {
-		images = append(images, metadata.RemoteImage{
-			URL:  series.FanartURL,
-			Type: metadata.ImageBackdrop,
-		})
-	}
-	if series.BannerURL != "" {
-		images = append(images, metadata.RemoteImage{
-			URL:  series.BannerURL,
-			Type: metadata.ImageBanner,
-		})
-	}
-	return images, nil
-}
-
-func (p *Provider) getEpisodeImages(ctx context.Context, eventID string) ([]metadata.RemoteImage, error) {
-	ep, err := p.client.GetEpisode(ctx, eventID)
-	if err != nil {
-		return nil, err
-	}
-
-	var images []metadata.RemoteImage
-	if ep.ThumbURL != "" {
-		images = append(images, metadata.RemoteImage{
-			URL:  ep.ThumbURL,
-			Type: metadata.ImageStill,
-		})
-	}
-	return images, nil
+	return entityImagesToRemote(resp.Images), nil
 }
 

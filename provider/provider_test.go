@@ -166,10 +166,18 @@ func TestGetEpisodes(t *testing.T) {
 
 func TestGetImagesForSeries(t *testing.T) {
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(AgentSeriesResponse{
-			PosterURL: "https://sportarr.net/img/poster.jpg",
-			FanartURL: "https://sportarr.net/img/fanart.jpg",
-			BannerURL: "https://sportarr.net/img/banner.jpg",
+		if r.URL.Path != "/api/v1/images/entity/league/league-1" {
+			t.Errorf("expected entity image path, got %s", r.URL.Path)
+		}
+		w1, h1 := 680, 1000
+		w2, h2 := 1920, 1080
+		json.NewEncoder(w).Encode(EntityImageResponse{
+			Images: []EntityImage{
+				{ID: "img-1", ImageType: "poster", URL: "https://sportarr.net/api/v1/images/img-1", IsPrimary: true, Width: &w1, Height: &h1},
+				{ID: "img-2", ImageType: "backdrop", URL: "https://sportarr.net/api/v1/images/img-2", Width: &w2, Height: &h2},
+				{ID: "img-3", ImageType: "logo", URL: "https://sportarr.net/api/v1/images/img-3"},
+				{ID: "img-4", ImageType: "banner", URL: "https://sportarr.net/api/v1/images/img-4"},
+			},
 		})
 	}))
 
@@ -180,24 +188,27 @@ func TestGetImagesForSeries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get images failed: %v", err)
 	}
-	if len(images) != 3 {
-		t.Fatalf("expected 3 images, got %d", len(images))
+	if len(images) != 4 {
+		t.Fatalf("expected 4 images, got %d", len(images))
 	}
+	// Primary poster should sort first
 	if images[0].Type != metadata.ImagePoster {
-		t.Errorf("expected poster type, got %d", images[0].Type)
+		t.Errorf("expected poster first (is_primary), got type %d", images[0].Type)
 	}
-	if images[1].Type != metadata.ImageBackdrop {
-		t.Errorf("expected backdrop type for fanart, got %d", images[1].Type)
-	}
-	if images[2].Type != metadata.ImageBanner {
-		t.Errorf("expected banner type, got %d", images[2].Type)
+	if images[0].Width != 680 || images[0].Height != 1000 {
+		t.Errorf("expected 680x1000, got %dx%d", images[0].Width, images[0].Height)
 	}
 }
 
 func TestGetImagesForEpisode(t *testing.T) {
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(AgentEpisodeResponse{
-			ThumbURL: "https://sportarr.net/img/thumb.jpg",
+		if r.URL.Path != "/api/v1/images/entity/event/ev-1" {
+			t.Errorf("expected entity image path for event, got %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(EntityImageResponse{
+			Images: []EntityImage{
+				{ID: "img-t1", ImageType: "thumbnail", URL: "https://sportarr.net/api/v1/images/img-t1"},
+			},
 		})
 	}))
 
@@ -213,6 +224,33 @@ func TestGetImagesForEpisode(t *testing.T) {
 	}
 	if images[0].Type != metadata.ImageStill {
 		t.Errorf("expected still type, got %d", images[0].Type)
+	}
+}
+
+func TestGetImagesForSeason(t *testing.T) {
+	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/images/entity/season/season-uuid-1" {
+			t.Errorf("expected entity image path for season, got %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(EntityImageResponse{
+			Images: []EntityImage{
+				{ID: "img-sp1", ImageType: "poster", URL: "https://sportarr.net/api/v1/images/img-sp1", IsPrimary: true},
+			},
+		})
+	}))
+
+	images, err := p.GetImages(context.Background(), metadata.ImageRequest{
+		ProviderIDs: map[string]string{"sportarr": "season-uuid-1"},
+		ContentType: "season",
+	})
+	if err != nil {
+		t.Fatalf("get images failed: %v", err)
+	}
+	if len(images) != 1 {
+		t.Fatalf("expected 1 image, got %d", len(images))
+	}
+	if images[0].Type != metadata.ImagePoster {
+		t.Errorf("expected poster type, got %d", images[0].Type)
 	}
 }
 
