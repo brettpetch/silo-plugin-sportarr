@@ -4,7 +4,7 @@ Switch image fetching from the Sportarr agents endpoint inline URL fields to the
 
 ## Problem
 
-The agents endpoint (`/api/metadata/agents/series/{id}`) returns inline image URLs (`poster_url`, `fanart_url`, `banner_url`) that resolve to the wrong host (`the wrong host` instead of `sportarr.net`). Additionally:
+The agents endpoint (`/api/metadata/agents/series/{id}`) returns inline image URLs (`poster_url`, `fanart_url`, `banner_url`) that resolve to the wrong host. Additionally:
 
 - `fanart_url` is null for many leagues (e.g. NHL) even though the entity image API has backdrop images available
 - No `logo` field exists on the agents endpoint
