@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/Silo-Server/silo-plugin-sportarr/metadata"
 )
@@ -26,6 +27,77 @@ func NewProviderWithClient(c *Client) *Provider {
 func (p *Provider) Slug() string       { return "sportarr" }
 func (p *Provider) Name() string       { return "Sportarr" }
 func (p *Provider) ForTypes() []string { return []string{"series"} }
+
+func mapImageType(t string) (metadata.ImageType, bool) {
+	switch t {
+	case "poster":
+		return metadata.ImagePoster, true
+	case "backdrop":
+		return metadata.ImageBackdrop, true
+	case "logo":
+		return metadata.ImageLogo, true
+	case "banner":
+		return metadata.ImageBanner, true
+	case "thumbnail":
+		return metadata.ImageStill, true
+	default:
+		return 0, false
+	}
+}
+
+func pickPrimaryURL(images []EntityImage, imageType string) string {
+	var best *EntityImage
+	for i := range images {
+		img := &images[i]
+		if img.ImageType != imageType {
+			continue
+		}
+		if best == nil {
+			best = img
+			continue
+		}
+		if img.IsPrimary && !best.IsPrimary {
+			best = img
+		} else if img.IsPrimary == best.IsPrimary && img.Priority > best.Priority {
+			best = img
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.URL
+}
+
+func entityImagesToRemote(images []EntityImage) []metadata.RemoteImage {
+	sorted := make([]EntityImage, len(images))
+	copy(sorted, images)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].IsPrimary != sorted[j].IsPrimary {
+			return sorted[i].IsPrimary
+		}
+		return sorted[i].Priority > sorted[j].Priority
+	})
+
+	var out []metadata.RemoteImage
+	for _, img := range sorted {
+		imgType, ok := mapImageType(img.ImageType)
+		if !ok {
+			continue
+		}
+		ri := metadata.RemoteImage{
+			URL:  img.URL,
+			Type: imgType,
+		}
+		if img.Width != nil {
+			ri.Width = *img.Width
+		}
+		if img.Height != nil {
+			ri.Height = *img.Height
+		}
+		out = append(out, ri)
+	}
+	return out
+}
 
 func (p *Provider) Search(ctx context.Context, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
 	if sportarrID := query.ProviderIDs["sportarr"]; sportarrID != "" {

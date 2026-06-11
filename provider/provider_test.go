@@ -245,3 +245,96 @@ func TestGetMetadataNoProviderID(t *testing.T) {
 		t.Errorf("expected nil result, got %v", result)
 	}
 }
+
+func TestPickPrimaryURL(t *testing.T) {
+	images := []EntityImage{
+		{ImageType: "poster", URL: "https://sportarr.net/api/v1/images/p1", Priority: 5},
+		{ImageType: "poster", URL: "https://sportarr.net/api/v1/images/p2", IsPrimary: true, Priority: 1},
+		{ImageType: "backdrop", URL: "https://sportarr.net/api/v1/images/b1", IsPrimary: true},
+		{ImageType: "logo", URL: "https://sportarr.net/api/v1/images/l1"},
+	}
+
+	tests := []struct {
+		name      string
+		imageType string
+		want      string
+	}{
+		{"primary poster wins over higher priority", "poster", "https://sportarr.net/api/v1/images/p2"},
+		{"backdrop", "backdrop", "https://sportarr.net/api/v1/images/b1"},
+		{"logo", "logo", "https://sportarr.net/api/v1/images/l1"},
+		{"no match returns empty", "banner", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pickPrimaryURL(images, tt.imageType)
+			if got != tt.want {
+				t.Errorf("pickPrimaryURL(%q) = %q, want %q", tt.imageType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPickPrimaryURLPriorityTiebreak(t *testing.T) {
+	images := []EntityImage{
+		{ImageType: "poster", URL: "https://sportarr.net/api/v1/images/low", Priority: 1},
+		{ImageType: "poster", URL: "https://sportarr.net/api/v1/images/high", Priority: 10},
+	}
+	got := pickPrimaryURL(images, "poster")
+	if got != "https://sportarr.net/api/v1/images/high" {
+		t.Errorf("expected highest priority poster, got %s", got)
+	}
+}
+
+func TestPickPrimaryURLEmpty(t *testing.T) {
+	got := pickPrimaryURL(nil, "poster")
+	if got != "" {
+		t.Errorf("expected empty for nil images, got %s", got)
+	}
+}
+
+func TestEntityImagesToRemote(t *testing.T) {
+	w1, h1 := 680, 1000
+	images := []EntityImage{
+		{ImageType: "poster", URL: "https://sportarr.net/api/v1/images/p1", Width: &w1, Height: &h1, Priority: 1},
+		{ImageType: "backdrop", URL: "https://sportarr.net/api/v1/images/b1", IsPrimary: true},
+		{ImageType: "logo", URL: "https://sportarr.net/api/v1/images/l1"},
+		{ImageType: "banner", URL: "https://sportarr.net/api/v1/images/bn1"},
+		{ImageType: "thumbnail", URL: "https://sportarr.net/api/v1/images/t1"},
+		{ImageType: "headshot", URL: "https://sportarr.net/api/v1/images/skip"},
+	}
+
+	result := entityImagesToRemote(images)
+
+	if len(result) != 5 {
+		t.Fatalf("expected 5 images (headshot skipped), got %d", len(result))
+	}
+
+	// Primary backdrop should sort first
+	if result[0].Type != metadata.ImageBackdrop {
+		t.Errorf("expected backdrop first (is_primary), got type %d", result[0].Type)
+	}
+	if result[0].URL != "https://sportarr.net/api/v1/images/b1" {
+		t.Errorf("unexpected URL: %s", result[0].URL)
+	}
+
+	// Check width/height populated
+	found := false
+	for _, img := range result {
+		if img.Type == metadata.ImagePoster {
+			found = true
+			if img.Width != 680 || img.Height != 1000 {
+				t.Errorf("expected 680x1000, got %dx%d", img.Width, img.Height)
+			}
+		}
+	}
+	if !found {
+		t.Error("poster not found in results")
+	}
+}
+
+func TestEntityImagesToRemoteEmpty(t *testing.T) {
+	result := entityImagesToRemote(nil)
+	if len(result) != 0 {
+		t.Errorf("expected empty result, got %d", len(result))
+	}
+}
