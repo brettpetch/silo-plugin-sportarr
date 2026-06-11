@@ -128,12 +128,29 @@ func TestGetMetadata(t *testing.T) {
 
 func TestGetSeasons(t *testing.T) {
 	p := newTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(AgentSeasonsResponse{
-			Seasons: []AgentSeason{
-				{SeasonNumber: 2023, Name: "2023 Season", EpisodeCount: 23},
-				{SeasonNumber: 2024, Name: "2024 Season", EpisodeCount: 24},
-			},
-		})
+		switch r.URL.Path {
+		case "/api/metadata/agents/series/league-1/seasons":
+			json.NewEncoder(w).Encode(AgentSeasonsResponse{
+				Seasons: []AgentSeason{
+					{CompetitionSeasonID: "cs-2023", SeasonNumber: 2023, Name: "2023 Season", EpisodeCount: 23},
+					{CompetitionSeasonID: "cs-2024", SeasonNumber: 2024, Name: "2024 Season", EpisodeCount: 24},
+				},
+			})
+		case "/api/v1/images/entity/season/cs-2023":
+			json.NewEncoder(w).Encode(EntityImageResponse{
+				Images: []EntityImage{
+					{ID: "sp1", ImageType: "poster", URL: "https://sportarr.net/api/v1/images/sp1", IsPrimary: true},
+				},
+			})
+		case "/api/v1/images/entity/season/cs-2024":
+			json.NewEncoder(w).Encode(EntityImageResponse{
+				Images: []EntityImage{
+					{ID: "sp2", ImageType: "poster", URL: "https://sportarr.net/api/v1/images/sp2"},
+				},
+			})
+		default:
+			w.WriteHeader(404)
+		}
 	}))
 
 	seasons, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
@@ -150,6 +167,12 @@ func TestGetSeasons(t *testing.T) {
 	}
 	if seasons[1].Title != "2024 Season" {
 		t.Errorf("expected title 2024 Season, got %s", seasons[1].Title)
+	}
+	if seasons[0].PosterPath != "https://sportarr.net/api/v1/images/sp1" {
+		t.Errorf("expected poster from entity images, got %s", seasons[0].PosterPath)
+	}
+	if seasons[1].PosterPath != "https://sportarr.net/api/v1/images/sp2" {
+		t.Errorf("expected poster from entity images, got %s", seasons[1].PosterPath)
 	}
 }
 
